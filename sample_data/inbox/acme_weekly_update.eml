@@ -1,0 +1,12 @@
+Message-ID: <acme-weekly-update-001@example.test>
+Date: Tue, 16 Sep 2026 09:30:00 +0200
+From: alex@example.test
+To: operations@example.test
+Subject: [ACME-001] Weekly delivery update
+Content-Type: text/plain; charset="utf-8"
+
+Summary: Requirements workshop completed and the solution outline is ready.
+Status: at_risk
+Milestone: Solution design
+Risks: Client data export delayed; Design review availability
+Next actions: Confirm data export by Friday; Hold solution review on 22 September

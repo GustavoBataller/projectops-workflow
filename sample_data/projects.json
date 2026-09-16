@@ -1,0 +1,22 @@
+[
+  {
+    "project_id": "ACME-001",
+    "name": "Acme Office Launch",
+    "aliases": ["Acme", "Northstar rollout"],
+    "summary": "Discovery and requirements collection in progress.",
+    "status": "on_track",
+    "milestone": "Discovery",
+    "risks": [],
+    "next_actions": ["Complete requirements workshop"]
+  },
+  {
+    "project_id": "BRAVO-002",
+    "name": "Bravo Finance Migration",
+    "aliases": ["Bravo", "Ledger move"],
+    "summary": "Migration plan awaiting source-system inventory.",
+    "status": "on_track",
+    "milestone": "Inventory",
+    "risks": [],
+    "next_actions": ["Receive source-system inventory"]
+  }
+]
