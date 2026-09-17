@@ -52,6 +52,30 @@ message, execution time, code commit, and observed before/after provider state
 were actually exercised. Credentials, tokens, account identifiers, message
 content, and API responses must not be committed or included in public evidence.
 
+## Real E2E receipt — 2026-09-17
+
+A dedicated Gmail test account and a synthetic `ACME-001` update were exercised
+against implementation commit `c94d22df67e37004d224c5d5044c0526ebd75a51`.
+The OAuth grant contained exactly `gmail.readonly`. The run used message query
+selection followed by `messages.get(format=raw)`; provider-state checks used
+read-only metadata retrieval.
+
+Observed workflow:
+
+1. the unique synthetic message produced one `pending` proposal;
+2. the Project record was equivalent at the business-field level before and
+   after proposal creation;
+3. replay returned the same proposal as `duplicate` with one proposal stored;
+4. an explicit human-role approval applied the update once; and
+5. the ordered audit trail contained ingestion, proposal creation, approval,
+   and project update events.
+
+The Gmail label set and provider history marker were identical immediately
+before and after the final intake/replay sequence. `UNREAD` remained present.
+This is bounded evidence for that one sandbox message, not proof that every
+external Gmail behavior is immutable. No credential, token, account address,
+Gmail message ID, message body, or raw provider response is published here.
+
 ## Security and policy limits
 
 - OAuth client JSON and tokens are configured by paths and ignored by Git.
