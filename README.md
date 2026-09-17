@@ -15,6 +15,15 @@ client-delivered product. Its default demo runs entirely on local synthetic data
 and needs no secrets or third-party services. An optional Gmail sandbox adapter
 can exercise one real read-only intake boundary.
 
+## Walkthrough
+
+[▶ Watch the 4-minute ProjectOps Workflow walkthrough](https://youtu.be/gBVsrWvzWWw)
+
+The walkthrough shows the complete approval-first flow, including
+pending/no-mutation behavior, Human correction and approval, replay-safe
+processing, fail-closed ambiguity handling, audit reconstruction, and the
+read-only Gmail sandbox boundary.
+
 ## Solution
 
 The workflow separates interpretation from authority:
