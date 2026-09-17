@@ -14,9 +14,10 @@ until an explicit human decision, apply an approved update once, and retain an
 ordered audit trail. Synthetic data and a local runtime keep the evidence
 reproducible and safe to publish.
 
-Live integrations, runtime AI, authentication, multi-tenancy, hosting, and
-production operations were deliberately excluded. They are materially different
-product and security commitments, not prerequisites for testing this contract.
+The reproducible baseline excludes runtime AI, ProjectOps authentication,
+multi-tenancy, hosting, and production operations. One optional Gmail
+test-account adapter now exercises a real read-only intake seam without changing
+the downstream authority model; it is not a production Gmail integration.
 
 ## Architecture and tradeoffs
 
@@ -38,8 +39,9 @@ Project matching must produce exactly one result. Proposals have explicit
 version while leaving it pending.
 
 The public artifact includes the implementation, focused tests, synthetic
-fixtures, a one-command demo, business-oriented documentation, and an MIT
-license. It has no secret configuration or external runtime dependency.
+fixtures, a one-command local demo, business-oriented documentation, and an MIT
+license. The local path has no secret configuration or external runtime
+dependency; Gmail dependencies and credentials are separate and opt-in.
 
 ## Acceptance evidence
 
@@ -49,10 +51,14 @@ The public acceptance command is:
 python3 -m unittest discover -s tests -v
 ```
 
-Seven focused tests exercise pending-state safety, correction then approval,
+The seven original focused tests exercise pending-state safety, correction then approval,
 exactly-once application within the local SQLite boundary, rejection,
 ambiguity/unmatched/unstructured failures, conflicting replay, invalid
 corrections, duplicate ingestion, and audit reconstruction.
+
+Additional deterministic tests exercise Gmail raw-message conversion, the
+read-only request surface, duplicate/conflict behavior, query ambiguity, and
+failure-without-mutation. They do not depend on a live Google account.
 
 The clean end-to-end command is:
 
@@ -67,7 +73,8 @@ trail.
 
 ## Limits
 
-This is a local working MVP/reference implementation. Its evidence does not
+This is a working MVP/reference implementation with an optional Gmail sandbox
+intake. Its evidence does not
 establish production readiness, distributed exactly-once delivery, tamper-proof
-audit storage, authenticated authorization, external integration quality,
+audit storage, OAuth verification, production external-integration quality,
 runtime AI capability, customer value, or client delivery.

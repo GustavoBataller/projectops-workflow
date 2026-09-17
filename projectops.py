@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -100,6 +101,12 @@ def create_schema(connection: sqlite3.Connection) -> None:
             body TEXT NOT NULL,
             content_hash TEXT NOT NULL UNIQUE,
             created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS message_sources (
+            source_identity TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL REFERENCES messages(message_id),
+            content_hash TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS proposals (
@@ -230,25 +237,41 @@ def message_body(message: Any) -> str:
     return str(message.get_content()).strip()
 
 
-def parse_message(source_path: str | Path) -> dict[str, str]:
-    path = Path(source_path)
-    try:
-        raw = path.read_bytes()
-        message = BytesParser(policy=policy.default).parsebytes(raw)
-    except OSError as exc:
-        raise ProjectOpsError(f"Cannot read message {path}: {exc}") from exc
+def parse_message_bytes(
+    raw: bytes,
+    *,
+    source_path: str,
+    source_identity: str | None = None,
+) -> dict[str, Any]:
+    """Normalize RFC 822 bytes at the shared ingestion boundary.
+
+    ``source_identity`` is a provider-owned immutable identifier when one is
+    available (for example, a Gmail message ID).  It participates in replay and
+    conflict detection without changing the downstream workflow.
+    """
+    message = BytesParser(policy=policy.default).parsebytes(raw)
     content_hash = hashlib.sha256(raw).hexdigest()
     source_message_id = str(message.get("Message-ID", "")).strip()
-    message_id = stable_id("msg", source_message_id or content_hash)
+    message_id = stable_id("msg", source_identity or source_message_id or content_hash)
     return {
         "message_id": message_id,
+        "source_identity": source_identity,
         "source_message_id": source_message_id,
-        "source_path": str(path),
+        "source_path": source_path,
         "subject": str(message.get("Subject", "")).strip(),
         "sender": str(message.get("From", "")).strip(),
         "body": message_body(message),
         "content_hash": content_hash,
     }
+
+
+def parse_message(source_path: str | Path) -> dict[str, Any]:
+    path = Path(source_path)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ProjectOpsError(f"Cannot read message {path}: {exc}") from exc
+    return parse_message_bytes(raw, source_path=str(path))
 
 
 def identify_project(connection: sqlite3.Connection, text: str) -> str:
@@ -283,14 +306,16 @@ def extract_update(subject: str, body: str) -> dict[str, Any]:
         "next action": "next_actions",
     }
     proposal: dict[str, Any] = {}
-    for raw_line in body.splitlines():
-        if ":" not in raw_line:
-            continue
-        label, value = raw_line.split(":", 1)
-        field = labels.get(label.strip().casefold())
-        if not field:
-            continue
-        proposal[field] = split_items(value) if field in LIST_FIELDS else value.strip()
+    label_pattern = re.compile(
+        r"(?<!\S)(summary|status|milestone|risks?|next actions?):\s*",
+        re.IGNORECASE,
+    )
+    matches = list(label_pattern.finditer(body))
+    for index, match in enumerate(matches):
+        field = labels[match.group(1).casefold()]
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        value = " ".join(body[match.end() : end].split())
+        proposal[field] = split_items(value) if field in LIST_FIELDS else value
 
     if not proposal.get("summary"):
         proposal["summary"] = subject.strip() or next(
@@ -313,11 +338,34 @@ def proposal_row(connection: sqlite3.Connection, message_id: str) -> sqlite3.Row
     ).fetchone()
 
 
-def ingest_message(db_path: str | Path, source_path: str | Path) -> IngestResult:
-    parsed = parse_message(source_path)
+def ingest_parsed_message(db_path: str | Path, parsed: dict[str, Any]) -> IngestResult:
     connection = connect(db_path)
     try:
         create_schema(connection)
+        source_identity = parsed.get("source_identity")
+        if source_identity:
+            source = connection.execute(
+                "SELECT * FROM message_sources WHERE source_identity = ?",
+                (source_identity,),
+            ).fetchone()
+            if source is not None:
+                if source["content_hash"] != parsed["content_hash"]:
+                    raise ProjectOpsError(
+                        "Source message identity was already ingested with different content; "
+                        "refusing ambiguous replay"
+                    )
+                existing = proposal_row(connection, source["message_id"])
+                if existing is None:
+                    raise ProjectOpsError("Source identity points to an incomplete ingestion")
+                return IngestResult(
+                    status="duplicate",
+                    message_id=existing["message_id"],
+                    proposal_id=existing["proposal_id"],
+                    project_id=existing["project_id"],
+                    proposal_state=existing["state"],
+                    proposal=json.loads(existing["proposal_json"]),
+                )
+
         existing = proposal_row(connection, parsed["message_id"])
         if existing is not None and existing["content_hash"] != parsed["content_hash"]:
             raise ProjectOpsError(
@@ -333,6 +381,15 @@ def ingest_message(db_path: str | Path, source_path: str | Path) -> IngestResult
                 (parsed["content_hash"],),
             ).fetchone()
         if existing is not None:
+            if source_identity:
+                with connection:
+                    connection.execute(
+                        """
+                        INSERT INTO message_sources (source_identity, message_id, content_hash)
+                        VALUES (?, ?, ?)
+                        """,
+                        (source_identity, existing["message_id"], parsed["content_hash"]),
+                    )
             return IngestResult(
                 status="duplicate",
                 message_id=existing["message_id"],
@@ -365,6 +422,14 @@ def ingest_message(db_path: str | Path, source_path: str | Path) -> IngestResult
                     now,
                 ),
             )
+            if source_identity:
+                connection.execute(
+                    """
+                    INSERT INTO message_sources (source_identity, message_id, content_hash)
+                    VALUES (?, ?, ?)
+                    """,
+                    (source_identity, parsed["message_id"], parsed["content_hash"]),
+                )
             connection.execute(
                 """
                 INSERT INTO proposals
@@ -402,6 +467,27 @@ def ingest_message(db_path: str | Path, source_path: str | Path) -> IngestResult
         )
     finally:
         connection.close()
+
+
+def ingest_message(db_path: str | Path, source_path: str | Path) -> IngestResult:
+    """Ingest an RFC 822 message from the existing local-file boundary."""
+    return ingest_parsed_message(db_path, parse_message(source_path))
+
+
+def ingest_rfc822_bytes(
+    db_path: str | Path,
+    raw: bytes,
+    *,
+    source_path: str,
+    source_identity: str | None = None,
+) -> IngestResult:
+    """Ingest externally retrieved RFC 822 bytes through the same workflow."""
+    parsed = parse_message_bytes(
+        raw,
+        source_path=source_path,
+        source_identity=source_identity,
+    )
+    return ingest_parsed_message(db_path, parsed)
 
 
 def validate_correction(value: Any) -> dict[str, Any]:
