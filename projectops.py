@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -305,14 +306,16 @@ def extract_update(subject: str, body: str) -> dict[str, Any]:
         "next action": "next_actions",
     }
     proposal: dict[str, Any] = {}
-    for raw_line in body.splitlines():
-        if ":" not in raw_line:
-            continue
-        label, value = raw_line.split(":", 1)
-        field = labels.get(label.strip().casefold())
-        if not field:
-            continue
-        proposal[field] = split_items(value) if field in LIST_FIELDS else value.strip()
+    label_pattern = re.compile(
+        r"(?<!\S)(summary|status|milestone|risks?|next actions?):\s*",
+        re.IGNORECASE,
+    )
+    matches = list(label_pattern.finditer(body))
+    for index, match in enumerate(matches):
+        field = labels[match.group(1).casefold()]
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        value = " ".join(body[match.end() : end].split())
+        proposal[field] = split_items(value) if field in LIST_FIELDS else value
 
     if not proposal.get("summary"):
         proposal["summary"] = subject.strip() or next(

@@ -111,6 +111,28 @@ class GmailIntakeTests(unittest.TestCase):
         review_proposal(self.db, result.proposal_id, "approve", "Test reviewer")
         self.assertEqual(get_project(self.db, "ACME-001")["status"], "at_risk")
 
+    def test_gmail_composed_inline_labels_keep_existing_ingestion_semantics(self):
+        headers, body = self.raw.split(b"\n\n", 1)
+        inline_body = b" ".join(body.splitlines()).replace(
+            b"Milestone: Solution design", b"Milestone: Solution\r\n design"
+        )
+        inline_raw = headers + b"\n\n" + inline_body + b"\n"
+
+        result = ingest_gmail_message(
+            self.db,
+            FakeService(ReadOnlyMessages(inline_raw)),
+            message_id="gmail-inline-message-001",
+        )
+
+        self.assertEqual(result.status, "created")
+        self.assertEqual(result.proposal_state, "pending")
+        self.assertEqual(result.proposal["status"], "at_risk")
+        self.assertEqual(result.proposal["milestone"], "Solution design")
+        self.assertEqual(result.proposal["risks"], [
+            "Client data export delayed",
+            "Design review availability",
+        ])
+
     def test_query_must_select_one_message_and_duplicate_replay_is_idempotent(self):
         messages = ReadOnlyMessages(self.raw)
         service = FakeService(messages)
